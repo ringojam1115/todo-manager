@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getSuggestionLanguage } from './settings-modal';
 
 type SuggestionItem = {
   id: string;
@@ -75,7 +76,7 @@ export default function SuggestionSection({ date, onAdopted }: Props) {
       const suggestRes = await fetch('/api/ai/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ graph_id, target_date: date }),
+        body: JSON.stringify({ graph_id, target_date: date, language: getSuggestionLanguage() }),
       });
       if (!suggestRes.ok) {
         const e = await suggestRes.json();

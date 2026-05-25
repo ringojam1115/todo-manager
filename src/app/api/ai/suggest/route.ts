@@ -26,10 +26,11 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { graph_id, target_date } = await req.json() as { graph_id: string; target_date: string };
+  const { graph_id, target_date, language } = await req.json() as { graph_id: string; target_date: string; language?: string };
   if (!graph_id || !target_date) {
     return NextResponse.json({ error: 'graph_id and target_date required' }, { status: 400 });
   }
+  const lang = language ?? 'Japanese';
 
   const { data: graph, error: graphErr } = await supabase
     .from('graphs')
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     .map((t) => `${'  '.repeat(t.indent_level)}${t.completed ? '[x]' : '[ ]'} ${t.text}`)
     .join('\n');
 
-  const systemPrompt = `You are a productivity assistant. Based on the user's knowledge graph of tasks and habits, suggest a todo list for the target date. Respond with JSON only.
+  const systemPrompt = `You are a productivity assistant. Based on the user's knowledge graph of tasks and habits, suggest a todo list for the target date. Respond with JSON only. Write all todo text in ${lang}.
 
 Output format:
 {

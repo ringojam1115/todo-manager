@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import MiniCalendar from './mini-calendar';
+import SettingsModal from './settings-modal';
 
 const NAV_ITEMS = [
   { href: '/',         label: 'Today',    icon: '☀' },
@@ -13,6 +15,7 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -54,15 +57,23 @@ export default function Sidebar() {
         <MiniCalendar />
       </div>
 
-      {/* Sign out */}
-      <div className="mt-auto px-4 pb-5">
+      {/* Settings / Sign out */}
+      <div className="mt-auto px-4 pb-5 flex flex-col gap-2">
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="text-xs text-stone-400 hover:text-stone-600 transition-colors text-left"
+        >
+          Settings
+        </button>
         <button
           onClick={handleSignOut}
-          className="text-xs text-stone-400 hover:text-stone-600 transition-colors"
+          className="text-xs text-stone-400 hover:text-stone-600 transition-colors text-left"
         >
           Sign out
         </button>
       </div>
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }
