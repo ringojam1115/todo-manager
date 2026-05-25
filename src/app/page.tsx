@@ -57,7 +57,13 @@ export default function TodayPage() {
   // ── text persistence ────────────────────────────────────────────────────────
 
   const persistText = useCallback((id: string, text: string) => {
-    supabase.from('todos').update({ text, updated_at: now() }).eq('id', id);
+    supabase
+      .from('todos')
+      .update({ text, updated_at: now() })
+      .eq('id', id)
+      .then(({ error }) => {
+        if (error) console.error('text save failed:', error.message);
+      });
   }, []);
 
   const scheduleTextSave = useCallback(
