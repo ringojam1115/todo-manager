@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 type SuggestionItem = {
@@ -25,6 +25,34 @@ export default function SuggestionSection({ date, onAdopted }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    setItems([]);
+    setOpen(false);
+
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      const { data: suggestion } = await supabase
+        .from('suggestions')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('target_date', date)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (!suggestion) return;
+
+      const { data: savedItems } = await supabase
+        .from('suggestion_items')
+        .select('*')
+        .eq('suggestion_id', suggestion.id)
+        .order('order');
+      if (savedItems && savedItems.length > 0) {
+        setItems(savedItems as SuggestionItem[]);
+        setOpen(true);
+      }
+    });
+  }, [date]);
 
   async function generate() {
     setLoading(true);
