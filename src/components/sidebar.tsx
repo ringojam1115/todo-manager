@@ -6,8 +6,8 @@ import { supabase } from '@/lib/supabase';
 import MiniCalendar from './mini-calendar';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Today' },
-  { href: '/tomorrow', label: 'Tomorrow' },
+  { href: '/',         label: 'Today',    icon: '☀' },
+  { href: '/tomorrow', label: 'Tomorrow', icon: '→' },
 ];
 
 export default function Sidebar() {
@@ -21,31 +21,36 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-[220px] flex-shrink-0 h-full flex flex-col bg-gray-50 border-r border-gray-100">
+    <aside className="w-[220px] flex-shrink-0 h-full flex flex-col bg-stone-100 border-r border-stone-200">
       {/* Logo */}
-      <div className="px-4 pt-5 pb-3">
-        <span className="text-sm font-semibold text-gray-800 tracking-tight">todo-manager</span>
+      <div className="px-4 pt-5 pb-4 flex items-center gap-2">
+        <span className="text-base leading-none">☑</span>
+        <span className="text-sm font-semibold text-stone-700 tracking-tight">todo-manager</span>
       </div>
 
       {/* Navigation */}
       <nav className="px-2 space-y-0.5">
-        {NAV_ITEMS.map(({ href, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`flex items-center px-3 py-1.5 rounded-md text-sm transition-colors ${
-              pathname === href
-                ? 'bg-gray-200 text-gray-900 font-medium'
-                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
-            }`}
-          >
-            {label}
-          </Link>
-        ))}
+        {NAV_ITEMS.map(({ href, label, icon }) => {
+          const isActive = pathname === href;
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${
+                isActive
+                  ? 'bg-white text-stone-800 font-medium shadow-sm'
+                  : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
+              }`}
+            >
+              <span className="text-base leading-none">{icon}</span>
+              {label}
+            </Link>
+          );
+        })}
       </nav>
 
       {/* Mini Calendar */}
-      <div className="mt-5 px-3 border-t border-gray-100 pt-4">
+      <div className="mt-5 px-3 pt-4 border-t border-stone-200">
         <MiniCalendar />
       </div>
 
@@ -53,7 +58,7 @@ export default function Sidebar() {
       <div className="mt-auto px-4 pb-5">
         <button
           onClick={handleSignOut}
-          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-xs text-stone-400 hover:text-stone-600 transition-colors"
         >
           Sign out
         </button>
