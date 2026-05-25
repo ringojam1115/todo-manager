@@ -43,6 +43,16 @@ export default function TodoList({ date, label }: Props) {
   const inserting = useRef(false);
   const memoInputRefs = useRef(new Map<string, HTMLInputElement>());
   const memoPendingSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const pendingFocusId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingFocusId.current) return;
+    const el = inputRefs.current.get(pendingFocusId.current);
+    if (el) {
+      el.focus();
+      pendingFocusId.current = null;
+    }
+  }, [todos]);
 
   // ── initial load ────────────────────────────────────────────────────────────
 
@@ -217,12 +227,12 @@ export default function TodoList({ date, label }: Props) {
         if (error) { console.error('insertAfter failed:', error.message); return; }
         if (!data) return;
 
+        pendingFocusId.current = data.id;
         setTodos((prevTodos) => [
           ...prevTodos.slice(0, index + 1),
           data as Todo,
           ...prevTodos.slice(index + 1),
         ]);
-        setTimeout(() => inputRefs.current.get(data.id)?.focus(), 0);
       } finally {
         inserting.current = false;
       }
@@ -278,8 +288,8 @@ export default function TodoList({ date, label }: Props) {
       .single();
     if (error) { console.error('createFirst failed:', error.message); return; }
     if (data) {
+      pendingFocusId.current = data.id;
       setTodos([data as Todo]);
-      setTimeout(() => inputRefs.current.get(data.id)?.focus(), 0);
     }
   }, [date, userId]);
 
@@ -370,7 +380,7 @@ export default function TodoList({ date, label }: Props) {
           return (
             <Fragment key={todo.id}>
               <li
-                className="flex items-center gap-3 py-1.5"
+                className="flex items-center gap-3 py-0.5"
                 style={{ paddingLeft: todo.indent_level * INDENT_PX }}
               >
                 <input
