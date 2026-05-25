@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -16,6 +16,14 @@ type Todo = {
   updated_at: string;
 };
 
+type Memo = {
+  id: string;
+  todo_id: string;
+  text: string;
+  is_pre_edit: boolean;
+  created_at: string;
+};
+
 const now = () => new Date().toISOString();
 
 const MAX_INDENT = 4;
@@ -24,13 +32,20 @@ const INDENT_PX = 24;
 export default function TodayPage() {
   const router = useRouter();
   const [todos, setTodos] = useState<Todo[]>([]);
+  const [memos, setMemos] = useState<Memo[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+
   const inputRefs = useRef(new Map<string, HTMLInputElement>());
   const pendingSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inserting = useRef(false);
 
+  const memoInputRefs = useRef(new Map<string, HTMLInputElement>());
+  const memoPendingSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
   const today = new Date().toISOString().split('T')[0];
+
+  // ── initial load ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -42,8 +57,19 @@ export default function TodayPage() {
       .select('*')
       .eq('date', today)
       .order('position')
-      .then(({ data }) => {
-        if (data) setTodos(data as Todo[]);
+      .then(async ({ data: todosData }) => {
+        if (!todosData) { setLoading(false); return; }
+        setTodos(todosData as Todo[]);
+
+        const completedIds = (todosData as Todo[]).filter((t) => t.completed).map((t) => t.id);
+        if (completedIds.length > 0) {
+          const { data: memosData } = await supabase
+            .from('todo_memos')
+            .select('*')
+            .in('todo_id', completedIds)
+            .order('created_at');
+          if (memosData) setMemos(memosData as Memo[]);
+        }
         setLoading(false);
       });
   }, [today]);
@@ -54,7 +80,7 @@ export default function TodayPage() {
     router.refresh();
   }, [router]);
 
-  // ── text persistence ────────────────────────────────────────────────────────
+  // ── todo text persistence ───────────────────────────────────────────────────
 
   const persistText = useCallback((id: string, text: string) => {
     supabase
@@ -90,8 +116,6 @@ export default function TodayPage() {
     [persistText],
   );
 
-  // ── handlers ────────────────────────────────────────────────────────────────
-
   const handleTextChange = useCallback(
     (id: string, text: string) => {
       setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, text } : t)));
@@ -100,10 +124,82 @@ export default function TodayPage() {
     [scheduleTextSave],
   );
 
-  const toggleCompleted = useCallback(async (id: string, completed: boolean) => {
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, completed } : t)));
-    await supabase.from('todos').update({ completed, updated_at: now() }).eq('id', id);
+  // ── memo text persistence ───────────────────────────────────────────────────
+
+  const persistMemoText = useCallback((id: string, text: string) => {
+    supabase
+      .from('todo_memos')
+      .update({ text })
+      .eq('id', id)
+      .then(({ error }) => {
+        if (error) console.error('memo save failed:', error.message);
+      });
   }, []);
+
+  const scheduleMemoSave = useCallback(
+    (id: string, text: string) => {
+      const existing = memoPendingSaves.current.get(id);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        persistMemoText(id, text);
+        memoPendingSaves.current.delete(id);
+      }, 500);
+      memoPendingSaves.current.set(id, timer);
+    },
+    [persistMemoText],
+  );
+
+  const flushMemoSave = useCallback(
+    (id: string, text: string) => {
+      const timer = memoPendingSaves.current.get(id);
+      if (!timer) return;
+      clearTimeout(timer);
+      memoPendingSaves.current.delete(id);
+      persistMemoText(id, text);
+    },
+    [persistMemoText],
+  );
+
+  const handleMemoTextChange = useCallback(
+    (id: string, text: string) => {
+      setMemos((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
+      scheduleMemoSave(id, text);
+    },
+    [scheduleMemoSave],
+  );
+
+  // ── todo handlers ───────────────────────────────────────────────────────────
+
+  const toggleCompleted = useCallback(
+    async (id: string, completed: boolean) => {
+      setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, completed } : t)));
+      await supabase.from('todos').update({ completed, updated_at: now() }).eq('id', id);
+
+      if (completed) {
+        // Create the first empty memo and focus it
+        const { data, error } = await supabase
+          .from('todo_memos')
+          .insert({ todo_id: id, text: '', is_pre_edit: false })
+          .select()
+          .single();
+        if (!error && data) {
+          setMemos((prev) => [...prev, data as Memo]);
+          setTimeout(() => memoInputRefs.current.get(data.id)?.focus(), 0);
+        }
+      } else {
+        // Archive active memos as pre-edit
+        setMemos((prev) =>
+          prev.map((m) => (m.todo_id === id && !m.is_pre_edit ? { ...m, is_pre_edit: true } : m)),
+        );
+        await supabase
+          .from('todo_memos')
+          .update({ is_pre_edit: true })
+          .eq('todo_id', id)
+          .eq('is_pre_edit', false);
+      }
+    },
+    [],
+  );
 
   const handleIndent = useCallback(async (id: string, currentIndent: number, delta: number) => {
     const next = Math.max(0, Math.min(MAX_INDENT, currentIndent + delta));
@@ -112,8 +208,6 @@ export default function TodayPage() {
     await supabase.from('todos').update({ indent_level: next, updated_at: now() }).eq('id', id);
   }, []);
 
-  // Insert a new todo after `index` using fractional positioning —
-  // never requires updating sibling rows.
   const insertAfter = useCallback(
     async (index: number, indentLevel: number) => {
       if (inserting.current) return;
@@ -122,17 +216,23 @@ export default function TodayPage() {
         const prev = todos[index];
         const next = todos[index + 1];
         const position =
-          next == null
-            ? (prev?.position ?? 0) + 1
-            : (prev.position + next.position) / 2;
+          next == null ? (prev?.position ?? 0) + 1 : (prev.position + next.position) / 2;
 
         const { data, error } = await supabase
           .from('todos')
-          .insert({ text: '', completed: false, indent_level: indentLevel, date: today, position, updated_at: now(), user_id: userId })
+          .insert({
+            text: '',
+            completed: false,
+            indent_level: indentLevel,
+            date: today,
+            position,
+            updated_at: now(),
+            user_id: userId,
+          })
           .select()
           .single();
 
-        if (error) { console.error('insertAfter failed:', error.code, error.message, error.details, error.hint); return; }
+        if (error) { console.error('insertAfter failed:', error.message); return; }
         if (!data) return;
 
         setTodos((prevTodos) => [
@@ -140,7 +240,6 @@ export default function TodayPage() {
           data as Todo,
           ...prevTodos.slice(index + 1),
         ]);
-
         setTimeout(() => inputRefs.current.get(data.id)?.focus(), 0);
       } finally {
         inserting.current = false;
@@ -154,14 +253,12 @@ export default function TodayPage() {
       flushTextSave(id, text);
       const prevTodo = todos[index - 1];
       setTodos((prev) => prev.filter((t) => t.id !== id));
+      setMemos((prev) => prev.filter((m) => m.todo_id !== id));
       await supabase.from('todos').delete().eq('id', id);
       if (prevTodo) {
         setTimeout(() => {
           const el = inputRefs.current.get(prevTodo.id);
-          if (el) {
-            el.focus();
-            el.setSelectionRange(el.value.length, el.value.length);
-          }
+          if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
         }, 0);
       }
     },
@@ -171,7 +268,6 @@ export default function TodayPage() {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, todo: Todo, index: number) => {
       if (e.nativeEvent.isComposing) return;
-
       switch (e.key) {
         case 'Enter':
           e.preventDefault();
@@ -195,15 +291,77 @@ export default function TodayPage() {
   const createFirst = useCallback(async () => {
     const { data, error } = await supabase
       .from('todos')
-      .insert({ text: '', completed: false, indent_level: 0, date: today, position: 0, updated_at: now(), user_id: userId })
+      .insert({
+        text: '',
+        completed: false,
+        indent_level: 0,
+        date: today,
+        position: 0,
+        updated_at: now(),
+        user_id: userId,
+      })
       .select()
       .single();
-    if (error) { console.error('createFirst failed:', error.code, error.message, error.details, error.hint); return; }
+    if (error) { console.error('createFirst failed:', error.message); return; }
     if (data) {
       setTodos([data as Todo]);
       setTimeout(() => inputRefs.current.get(data.id)?.focus(), 0);
     }
   }, [today, userId]);
+
+  // ── memo handlers ───────────────────────────────────────────────────────────
+
+  const addMemo = useCallback(async (todoId: string, afterMemoId?: string) => {
+    const { data, error } = await supabase
+      .from('todo_memos')
+      .insert({ todo_id: todoId, text: '', is_pre_edit: false })
+      .select()
+      .single();
+    if (error) { console.error('addMemo failed:', error.message); return; }
+    if (!data) return;
+
+    setMemos((prev) => {
+      if (!afterMemoId) return [...prev, data as Memo];
+      const idx = prev.findIndex((m) => m.id === afterMemoId);
+      if (idx === -1) return [...prev, data as Memo];
+      return [...prev.slice(0, idx + 1), data as Memo, ...prev.slice(idx + 1)];
+    });
+    setTimeout(() => memoInputRefs.current.get(data.id)?.focus(), 0);
+  }, []);
+
+  const deleteMemo = useCallback(
+    async (memo: Memo, todoId: string) => {
+      flushMemoSave(memo.id, memo.text);
+      const activeMemos = memos.filter((m) => m.todo_id === todoId && !m.is_pre_edit);
+      const memoIndex = activeMemos.findIndex((m) => m.id === memo.id);
+      const prevMemo = activeMemos[memoIndex - 1];
+
+      setMemos((prev) => prev.filter((m) => m.id !== memo.id));
+      await supabase.from('todo_memos').delete().eq('id', memo.id);
+
+      if (prevMemo) {
+        setTimeout(() => {
+          const el = memoInputRefs.current.get(prevMemo.id);
+          if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+        }, 0);
+      }
+    },
+    [memos, flushMemoSave],
+  );
+
+  const handleMemoKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>, memo: Memo, todoId: string) => {
+      if (e.nativeEvent.isComposing) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addMemo(todoId, memo.id);
+      } else if (e.key === 'Backspace' && memo.text === '') {
+        e.preventDefault();
+        deleteMemo(memo, todoId);
+      }
+    },
+    [addMemo, deleteMemo],
+  );
 
   // ── render ──────────────────────────────────────────────────────────────────
 
@@ -239,35 +397,87 @@ export default function TodayPage() {
         </header>
 
         <ul>
-          {todos.map((todo, index) => (
-            <li
-              key={todo.id}
-              className="flex items-center gap-3 py-1"
-              style={{ paddingLeft: todo.indent_level * INDENT_PX }}
-            >
-              <input
-                type="checkbox"
-                checked={todo.completed}
-                onChange={() => toggleCompleted(todo.id, !todo.completed)}
-                className="w-4 h-4 flex-shrink-0 cursor-pointer accent-blue-500 rounded"
-              />
-              <input
-                ref={(el) => {
-                  if (el) inputRefs.current.set(todo.id, el);
-                  else inputRefs.current.delete(todo.id);
-                }}
-                type="text"
-                value={todo.text}
-                placeholder="New todo"
-                onChange={(e) => handleTextChange(todo.id, e.target.value)}
-                onKeyDown={(e) => handleKeyDown(e, todo, index)}
-                onBlur={(e) => flushTextSave(todo.id, e.target.value)}
-                className={`flex-1 bg-transparent text-sm outline-none placeholder-gray-300 ${
-                  todo.completed ? 'line-through text-gray-300' : 'text-gray-800'
-                }`}
-              />
-            </li>
-          ))}
+          {todos.map((todo, index) => {
+            const todoMemos = memos.filter((m) => m.todo_id === todo.id);
+            const preEditMemos = todoMemos.filter((m) => m.is_pre_edit);
+            const activeMemos = todoMemos.filter((m) => !m.is_pre_edit);
+
+            return (
+              <Fragment key={todo.id}>
+                {/* todo row */}
+                <li
+                  className="flex items-center gap-3 py-1"
+                  style={{ paddingLeft: todo.indent_level * INDENT_PX }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={todo.completed}
+                    onChange={() => toggleCompleted(todo.id, !todo.completed)}
+                    className="w-4 h-4 flex-shrink-0 cursor-pointer accent-blue-500 rounded"
+                  />
+                  <input
+                    ref={(el) => {
+                      if (el) inputRefs.current.set(todo.id, el);
+                      else inputRefs.current.delete(todo.id);
+                    }}
+                    type="text"
+                    value={todo.text}
+                    placeholder="New todo"
+                    onChange={(e) => handleTextChange(todo.id, e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, todo, index)}
+                    onBlur={(e) => flushTextSave(todo.id, e.target.value)}
+                    className={`flex-1 bg-transparent text-sm outline-none placeholder-gray-300 ${
+                      todo.completed ? 'line-through text-gray-300' : 'text-gray-800'
+                    }`}
+                  />
+                </li>
+
+                {/* memo rows (only when completed) */}
+                {todo.completed && (
+                  <>
+                    {/* pre-edit memos — read-only */}
+                    {preEditMemos.map((memo) => (
+                      <li
+                        key={memo.id}
+                        className="flex items-baseline gap-2 py-0.5"
+                        style={{ paddingLeft: todo.indent_level * INDENT_PX + INDENT_PX }}
+                      >
+                        <span className="text-gray-300 flex-shrink-0 select-none">·</span>
+                        <span className="text-xs text-gray-400">
+                          <span className="text-gray-300 mr-1">pre-edit note:</span>
+                          {memo.text}
+                        </span>
+                      </li>
+                    ))}
+
+                    {/* active memo inputs */}
+                    {activeMemos.map((memo) => (
+                      <li
+                        key={memo.id}
+                        className="flex items-center gap-2 py-0.5"
+                        style={{ paddingLeft: todo.indent_level * INDENT_PX + INDENT_PX }}
+                      >
+                        <span className="text-gray-400 flex-shrink-0 select-none leading-none">·</span>
+                        <input
+                          ref={(el) => {
+                            if (el) memoInputRefs.current.set(memo.id, el);
+                            else memoInputRefs.current.delete(memo.id);
+                          }}
+                          type="text"
+                          value={memo.text}
+                          placeholder="Add a note…"
+                          onChange={(e) => handleMemoTextChange(memo.id, e.target.value)}
+                          onKeyDown={(e) => handleMemoKeyDown(e, memo, todo.id)}
+                          onBlur={(e) => flushMemoSave(memo.id, e.target.value)}
+                          className="flex-1 bg-transparent text-xs outline-none placeholder-gray-300 text-gray-500"
+                        />
+                      </li>
+                    ))}
+                  </>
+                )}
+              </Fragment>
+            );
+          })}
         </ul>
 
         {todos.length === 0 && (
