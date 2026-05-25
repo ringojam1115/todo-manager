@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 type Todo = {
@@ -21,8 +22,10 @@ const MAX_INDENT = 4;
 const INDENT_PX = 24;
 
 export default function TodayPage() {
+  const router = useRouter();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   const inputRefs = useRef(new Map<string, HTMLInputElement>());
   const pendingSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inserting = useRef(false);
@@ -30,6 +33,10 @@ export default function TodayPage() {
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUserId(user?.id ?? null);
+    });
+
     supabase
       .from('todos')
       .select('*')
@@ -40,6 +47,12 @@ export default function TodayPage() {
         setLoading(false);
       });
   }, [today]);
+
+  const handleSignOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  }, [router]);
 
   // ── text persistence ────────────────────────────────────────────────────────
 
@@ -109,11 +122,11 @@ export default function TodayPage() {
 
         const { data, error } = await supabase
           .from('todos')
-          .insert({ text: '', completed: false, indent_level: indentLevel, date: today, position, updated_at: now() })
+          .insert({ text: '', completed: false, indent_level: indentLevel, date: today, position, updated_at: now(), user_id: userId })
           .select()
           .single();
 
-        if (error) { console.error('insertAfter failed:', error); return; }
+        if (error) { console.error('insertAfter failed:', error.code, error.message, error.details, error.hint); return; }
         if (!data) return;
 
         setTodos((prevTodos) => [
@@ -127,7 +140,7 @@ export default function TodayPage() {
         inserting.current = false;
       }
     },
-    [todos, today],
+    [todos, today, userId],
   );
 
   const deleteTodo = useCallback(
@@ -174,15 +187,15 @@ export default function TodayPage() {
   const createFirst = useCallback(async () => {
     const { data, error } = await supabase
       .from('todos')
-      .insert({ text: '', completed: false, indent_level: 0, date: today, position: 0, updated_at: now() })
+      .insert({ text: '', completed: false, indent_level: 0, date: today, position: 0, updated_at: now(), user_id: userId })
       .select()
       .single();
-    if (error) { console.error('createFirst failed:', error); return; }
+    if (error) { console.error('createFirst failed:', error.code, error.message, error.details, error.hint); return; }
     if (data) {
       setTodos([data as Todo]);
       setTimeout(() => inputRefs.current.get(data.id)?.focus(), 0);
     }
-  }, [today]);
+  }, [today, userId]);
 
   // ── render ──────────────────────────────────────────────────────────────────
 
@@ -204,9 +217,17 @@ export default function TodayPage() {
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-2xl mx-auto px-8 py-12">
-        <header className="mb-8">
-          <p className="text-xs font-medium text-gray-400 tracking-wide mb-1">{dateLabel}</p>
-          <h1 className="text-2xl font-semibold text-gray-900">Today</h1>
+        <header className="mb-8 flex items-start justify-between">
+          <div>
+            <p className="text-xs font-medium text-gray-400 tracking-wide mb-1">{dateLabel}</p>
+            <h1 className="text-2xl font-semibold text-gray-900">Today</h1>
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors mt-1"
+          >
+            Sign out
+          </button>
         </header>
 
         <ul>
