@@ -109,11 +109,12 @@ export default function TodayPage() {
 
         const { data, error } = await supabase
           .from('todos')
-          .insert({ text: '', completed: false, indent_level: indentLevel, date: today, position })
+          .insert({ text: '', completed: false, indent_level: indentLevel, date: today, position, updated_at: now() })
           .select()
           .single();
 
-        if (error || !data) return;
+        if (error) { console.error('insertAfter failed:', error); return; }
+        if (!data) return;
 
         setTodos((prevTodos) => [
           ...prevTodos.slice(0, index + 1),
@@ -171,11 +172,12 @@ export default function TodayPage() {
   );
 
   const createFirst = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('todos')
-      .insert({ text: '', completed: false, indent_level: 0, date: today, position: 0 })
+      .insert({ text: '', completed: false, indent_level: 0, date: today, position: 0, updated_at: now() })
       .select()
       .single();
+    if (error) { console.error('createFirst failed:', error); return; }
     if (data) {
       setTodos([data as Todo]);
       setTimeout(() => inputRefs.current.get(data.id)?.focus(), 0);
@@ -192,11 +194,11 @@ export default function TodayPage() {
     );
   }
 
-  const dateLabel = new Date().toLocaleDateString('ja-JP', {
-    year: 'numeric',
+  const dateLabel = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
     month: 'long',
     day: 'numeric',
-    weekday: 'short',
+    year: 'numeric',
   });
 
   return (
