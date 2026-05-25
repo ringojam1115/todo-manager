@@ -370,7 +370,7 @@ export default function TodoList({ date, label }: Props) {
           return (
             <Fragment key={todo.id}>
               <li
-                className="flex items-center gap-3 py-1"
+                className="flex items-center gap-3 py-1.5"
                 style={{ paddingLeft: todo.indent_level * INDENT_PX }}
               >
                 <input
@@ -390,7 +390,7 @@ export default function TodoList({ date, label }: Props) {
                   onChange={(e) => handleTextChange(todo.id, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(e, todo, index)}
                   onBlur={(e) => flushTextSave(todo.id, e.target.value)}
-                  className={`flex-1 bg-transparent text-sm outline-none placeholder-gray-300 ${
+                  className={`flex-1 bg-transparent text-base outline-none placeholder-gray-300 leading-relaxed ${
                     todo.completed ? 'line-through text-gray-300' : 'text-gray-800'
                   }`}
                 />
@@ -405,7 +405,7 @@ export default function TodoList({ date, label }: Props) {
                       style={{ paddingLeft: todo.indent_level * INDENT_PX + INDENT_PX }}
                     >
                       <span className="text-gray-300 flex-shrink-0 select-none">·</span>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-sm text-gray-400">
                         <span className="text-gray-300 mr-1">pre-edit note:</span>
                         {memo.text}
                       </span>
@@ -429,7 +429,7 @@ export default function TodoList({ date, label }: Props) {
                         onChange={(e) => handleMemoTextChange(memo.id, e.target.value)}
                         onKeyDown={(e) => handleMemoKeyDown(e, memo, todo.id)}
                         onBlur={(e) => flushMemoSave(memo.id, e.target.value)}
-                        className="flex-1 bg-transparent text-xs outline-none placeholder-gray-300 text-gray-500"
+                        className="flex-1 bg-transparent text-sm outline-none placeholder-gray-300 text-gray-500 leading-relaxed"
                       />
                     </li>
                   ))}
