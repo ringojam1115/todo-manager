@@ -1,4 +1,4 @@
-import TodoList from '@/components/todo-list';
+import PageContent from '@/components/page-content';
 
 export default async function DatePage({ params }: { params: Promise<{ date: string }> }) {
   const { date } = await params;
@@ -6,5 +6,5 @@ export default async function DatePage({ params }: { params: Promise<{ date: str
     month: 'long',
     day: 'numeric',
   });
-  return <TodoList date={date} label={label} />;
+  return <PageContent date={date} label={label} />;
 }

@@ -1,6 +1,6 @@
-import TodoList from '@/components/todo-list';
+import PageContent from '@/components/page-content';
 
 export default function TodayPage() {
   const today = new Date().toISOString().split('T')[0];
-  return <TodoList date={today} label="Today" />;
+  return <PageContent date={today} label="Today" />;
 }
