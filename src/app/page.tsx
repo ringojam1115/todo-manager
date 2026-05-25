@@ -170,6 +170,8 @@ export default function TodayPage() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, todo: Todo, index: number) => {
+      if (e.nativeEvent.isComposing) return;
+
       switch (e.key) {
         case 'Enter':
           e.preventDefault();
