@@ -5,12 +5,17 @@ import { supabase } from '@/lib/supabase';
 
 type Todo = {
   id: string;
+  user_id: string | null;
   text: string;
+  date: string;
   completed: boolean;
   indent_level: number;
   position: number;
-  date: string;
+  created_at: string;
+  updated_at: string;
 };
+
+const now = () => new Date().toISOString();
 
 const MAX_INDENT = 4;
 const INDENT_PX = 24;
@@ -39,7 +44,7 @@ export default function TodayPage() {
   // ── text persistence ────────────────────────────────────────────────────────
 
   const persistText = useCallback((id: string, text: string) => {
-    supabase.from('todos').update({ text }).eq('id', id);
+    supabase.from('todos').update({ text, updated_at: now() }).eq('id', id);
   }, []);
 
   const scheduleTextSave = useCallback(
@@ -78,14 +83,14 @@ export default function TodayPage() {
 
   const toggleCompleted = useCallback(async (id: string, completed: boolean) => {
     setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, completed } : t)));
-    await supabase.from('todos').update({ completed }).eq('id', id);
+    await supabase.from('todos').update({ completed, updated_at: now() }).eq('id', id);
   }, []);
 
   const handleIndent = useCallback(async (id: string, currentIndent: number, delta: number) => {
     const next = Math.max(0, Math.min(MAX_INDENT, currentIndent + delta));
     if (next === currentIndent) return;
     setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, indent_level: next } : t)));
-    await supabase.from('todos').update({ indent_level: next }).eq('id', id);
+    await supabase.from('todos').update({ indent_level: next, updated_at: now() }).eq('id', id);
   }, []);
 
   // Insert a new todo after `index` using fractional positioning —
