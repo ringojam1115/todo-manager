@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 type Todo = {
@@ -44,6 +44,7 @@ export default function TodoList({ date, label }: Props) {
   const memoInputRefs = useRef(new Map<string, HTMLInputElement>());
   const memoPendingSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pendingFocusId = useRef<string | null>(null);
+  const pendingMemoFocusId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!pendingFocusId.current) return;
@@ -53,6 +54,15 @@ export default function TodoList({ date, label }: Props) {
       pendingFocusId.current = null;
     }
   }, [todos]);
+
+  useEffect(() => {
+    if (!pendingMemoFocusId.current) return;
+    const el = memoInputRefs.current.get(pendingMemoFocusId.current);
+    if (el) {
+      el.focus();
+      pendingMemoFocusId.current = null;
+    }
+  }, [memos]);
 
   // ── initial load ────────────────────────────────────────────────────────────
 
@@ -173,6 +183,25 @@ export default function TodoList({ date, label }: Props) {
     [scheduleMemoSave],
   );
 
+  // ── flat ordered list of focusable inputs (todos interleaved with their memos) ──
+
+  const flatItems = useMemo(() => {
+    const items: { type: 'todo' | 'memo'; id: string }[] = [];
+    for (const todo of todos) {
+      items.push({ type: 'todo', id: todo.id });
+      if (todo.completed) {
+        for (const memo of memos.filter((m) => m.todo_id === todo.id && !m.is_pre_edit)) {
+          items.push({ type: 'memo', id: memo.id });
+        }
+      }
+    }
+    return items;
+  }, [todos, memos]);
+
+  const focusItem = useCallback((item: { type: 'todo' | 'memo'; id: string }) => {
+    (item.type === 'todo' ? inputRefs.current : memoInputRefs.current).get(item.id)?.focus();
+  }, []);
+
   // ── todo handlers ───────────────────────────────────────────────────────────
 
   const toggleCompleted = useCallback(async (id: string, completed: boolean) => {
@@ -186,8 +215,8 @@ export default function TodoList({ date, label }: Props) {
         .select()
         .single();
       if (!error && data) {
+        pendingMemoFocusId.current = data.id;
         setMemos((prev) => [...prev, data as Memo]);
-        setTimeout(() => memoInputRefs.current.get(data.id)?.focus(), 0);
       }
     } else {
       setMemos((prev) =>
@@ -275,9 +304,19 @@ export default function TodoList({ date, label }: Props) {
             deleteTodo(todo.id, index, todo.text);
           }
           break;
+        case 'ArrowUp': {
+          const idx = flatItems.findIndex((item) => item.id === todo.id);
+          if (idx > 0) { e.preventDefault(); focusItem(flatItems[idx - 1]); }
+          break;
+        }
+        case 'ArrowDown': {
+          const idx = flatItems.findIndex((item) => item.id === todo.id);
+          if (idx < flatItems.length - 1) { e.preventDefault(); focusItem(flatItems[idx + 1]); }
+          break;
+        }
       }
     },
-    [insertAfter, handleIndent, deleteTodo],
+    [insertAfter, handleIndent, deleteTodo, flatItems, focusItem],
   );
 
   const createFirst = useCallback(async () => {
@@ -304,13 +343,13 @@ export default function TodoList({ date, label }: Props) {
     if (error) { console.error('addMemo failed:', error.message); return; }
     if (!data) return;
 
+    pendingMemoFocusId.current = data.id;
     setMemos((prev) => {
       if (!afterMemoId) return [...prev, data as Memo];
       const idx = prev.findIndex((m) => m.id === afterMemoId);
       if (idx === -1) return [...prev, data as Memo];
       return [...prev.slice(0, idx + 1), data as Memo, ...prev.slice(idx + 1)];
     });
-    setTimeout(() => memoInputRefs.current.get(data.id)?.focus(), 0);
   }, []);
 
   const deleteMemo = useCallback(
@@ -336,15 +375,27 @@ export default function TodoList({ date, label }: Props) {
   const handleMemoKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, memo: Memo, todoId: string) => {
       if (e.nativeEvent.isComposing) return;
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addMemo(todoId, memo.id);
-      } else if (e.key === 'Backspace' && memo.text === '') {
-        e.preventDefault();
-        deleteMemo(memo, todoId);
+      switch (e.key) {
+        case 'Enter':
+          e.preventDefault();
+          addMemo(todoId, memo.id);
+          break;
+        case 'Backspace':
+          if (memo.text === '') { e.preventDefault(); deleteMemo(memo, todoId); }
+          break;
+        case 'ArrowUp': {
+          const idx = flatItems.findIndex((item) => item.id === memo.id);
+          if (idx > 0) { e.preventDefault(); focusItem(flatItems[idx - 1]); }
+          break;
+        }
+        case 'ArrowDown': {
+          const idx = flatItems.findIndex((item) => item.id === memo.id);
+          if (idx < flatItems.length - 1) { e.preventDefault(); focusItem(flatItems[idx + 1]); }
+          break;
+        }
       }
     },
-    [addMemo, deleteMemo],
+    [addMemo, deleteMemo, flatItems, focusItem],
   );
 
   // ── render ──────────────────────────────────────────────────────────────────
