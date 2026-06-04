@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
   const { data: existingTodos } = await supabase
     .from('todos')
-    .select('text, completed, indent_level')
+    .select('id, text, completed, indent_level, position')
     .eq('user_id', user.id)
     .eq('date', target_date)
     .order('position');
@@ -52,20 +52,24 @@ export async function POST(req: NextRequest) {
     .map((t) => `${'  '.repeat(t.indent_level)}${t.completed ? '[x]' : '[ ]'} ${t.text}`)
     .join('\n');
 
-  const systemPrompt = `You are a productivity assistant. Based on the user's knowledge graph of tasks and habits, suggest a todo list for the target date. Respond with JSON only. Write all todo text in ${lang}.
+  const systemPrompt = `You are a productivity assistant. Based on the user's knowledge graph of tasks and habits, suggest todos for the target date. Respond with JSON only. Write all todo text in ${lang}.
 
 Output format:
 {
-  "items": [
-    { "text": "string", "indent_level": 0 }
+  "new_groups": [
+    { "parent": "string", "subtasks": ["string", ...] }
+  ],
+  "existing_task_subtasks": [
+    { "existing": "exact text of an existing todo", "subtasks": ["string", ...] }
   ]
 }
 
 Rules:
-- Suggest 3-8 actionable todos
-- Use indent_level 0 for top-level tasks, 1+ for subtasks
-- Be specific and actionable
-- Do not repeat todos already on the list`;
+- "new_groups": brand-new task ideas. Every group MUST have a "parent". "subtasks" may be empty (parent only) or list 1-4 actionable subtasks. NEVER produce subtasks without a parent.
+- "existing_task_subtasks": OPTIONAL — include only when you can genuinely break an existing todo into useful subtasks. "existing" MUST exactly match the text of one of the existing todos listed below, and the group MUST have at least one subtask. Omit this key entirely if there is nothing useful to add.
+- Suggest 3-8 items in total across both sections.
+- Be specific and actionable.
+- Do not repeat todos already on the list.`;
 
   const userPrompt = `Knowledge graph:\n${graphSummary}\n\nTarget date: ${target_date}\n\nExisting todos for this date:\n${existingList || '(none yet)'}\n\nSuggest additional todos for this date.`;
 
@@ -79,7 +83,9 @@ Rules:
   });
 
   const raw = completion.choices[0].message.content ?? '{}';
-  let parsed: { items: { text: string; indent_level: number }[] };
+  type NewGroup = { parent?: string; subtasks?: string[] };
+  type ExistingGroup = { existing?: string; subtasks?: string[] };
+  let parsed: { new_groups?: NewGroup[]; existing_task_subtasks?: ExistingGroup[] };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -94,13 +100,54 @@ Rules:
 
   if (suggErr || !suggestion) return NextResponse.json({ error: suggErr?.message }, { status: 500 });
 
-  const items = (parsed.items ?? []).map((item, i) => ({
-    suggestion_id: suggestion.id,
-    text: item.text,
-    indent_level: Math.max(0, Math.min(4, item.indent_level ?? 0)),
-    order: i,
-    adopted: false,
-  }));
+  type ItemRow = {
+    suggestion_id: string;
+    text: string;
+    indent_level: number;
+    order: number;
+    adopted: boolean;
+    existing_todo_id?: string;
+    parent_existing_todo_id?: string;
+  };
+  const items: ItemRow[] = [];
+  let order = 0;
+
+  // New task groups: parent (+ optional subtasks). Never subtask-only.
+  for (const group of parsed.new_groups ?? []) {
+    const parent = group.parent?.trim();
+    if (!parent) continue;
+    items.push({ suggestion_id: suggestion.id, text: parent, indent_level: 0, order: order++, adopted: false });
+    for (const sub of group.subtasks ?? []) {
+      const text = sub?.trim();
+      if (!text) continue;
+      items.push({ suggestion_id: suggestion.id, text, indent_level: 1, order: order++, adopted: false });
+    }
+  }
+
+  // Subtasks for existing todos: a read-only parent row + adoptable subtasks.
+  for (const group of parsed.existing_task_subtasks ?? []) {
+    const match = (existingTodos ?? []).find((t) => t.text === group.existing);
+    const subtasks = (group.subtasks ?? []).map((s) => s?.trim()).filter(Boolean) as string[];
+    if (!match || subtasks.length === 0) continue;
+    items.push({
+      suggestion_id: suggestion.id,
+      text: match.text,
+      indent_level: match.indent_level,
+      order: order++,
+      adopted: false,
+      existing_todo_id: match.id,
+    });
+    for (const text of subtasks) {
+      items.push({
+        suggestion_id: suggestion.id,
+        text,
+        indent_level: Math.min(4, match.indent_level + 1),
+        order: order++,
+        adopted: false,
+        parent_existing_todo_id: match.id,
+      });
+    }
+  }
 
   if (items.length > 0) {
     const { error: itemsErr } = await supabase.from('suggestion_items').insert(items);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -14,12 +14,23 @@ type Cell = { day: number; dateStr: string; isCurrentMonth: boolean };
 
 export default function MiniCalendar() {
   const router = useRouter();
+  const pathname = usePathname();
   const todayStr = new Date().toISOString().split('T')[0];
   const tomorrowStr = (() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     return d.toISOString().split('T')[0];
   })();
+
+  // The date currently being viewed, derived from the route.
+  const selectedStr =
+    pathname === '/'
+      ? todayStr
+      : pathname === '/tomorrow'
+        ? tomorrowStr
+        : pathname.startsWith('/date/')
+          ? pathname.slice('/date/'.length)
+          : todayStr;
 
   const [viewDate, setViewDate] = useState(() => {
     const d = new Date();
@@ -111,6 +122,7 @@ export default function MiniCalendar() {
       <div className="grid grid-cols-7 gap-y-0.5">
         {cells.map((cell, i) => {
           const isToday = cell.dateStr === todayStr;
+          const isSelected = cell.dateStr === selectedStr;
           const hasTodos = todoDates.has(cell.dateStr);
 
           return (
@@ -118,16 +130,22 @@ export default function MiniCalendar() {
               key={i}
               onClick={() => handleDateClick(cell.dateStr)}
               className={`flex flex-col items-center justify-center h-7 w-full rounded-full transition-colors ${
-                isToday ? 'bg-gray-900' : 'hover:bg-gray-200'
+                isToday
+                  ? 'bg-gray-900'
+                  : isSelected
+                    ? 'bg-gray-100 ring-1 ring-inset ring-gray-900'
+                    : 'hover:bg-gray-200'
               }`}
             >
               <span
                 className={`text-[11px] leading-none ${
                   isToday
                     ? 'text-white'
-                    : cell.isCurrentMonth
-                      ? 'text-gray-700'
-                      : 'text-gray-300'
+                    : isSelected
+                      ? 'text-gray-900 font-semibold'
+                      : cell.isCurrentMonth
+                        ? 'text-gray-700'
+                        : 'text-gray-300'
                 }`}
               >
                 {cell.day}

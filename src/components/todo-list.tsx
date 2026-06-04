@@ -286,13 +286,37 @@ export default function TodoList({ date, label }: Props) {
     [todos, flushTextSave],
   );
 
+  const addMemo = useCallback(async (todoId: string, afterMemoId?: string) => {
+    const { data, error } = await supabase
+      .from('todo_memos')
+      .insert({ todo_id: todoId, text: '', is_pre_edit: false })
+      .select()
+      .single();
+    if (error) { console.error('addMemo failed:', error.message); return; }
+    if (!data) return;
+
+    pendingMemoFocusId.current = data.id;
+    setMemos((prev) => {
+      if (!afterMemoId) return [...prev, data as Memo];
+      const idx = prev.findIndex((m) => m.id === afterMemoId);
+      if (idx === -1) return [...prev, data as Memo];
+      return [...prev.slice(0, idx + 1), data as Memo, ...prev.slice(idx + 1)];
+    });
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, todo: Todo, index: number) => {
       if (e.nativeEvent.isComposing) return;
       switch (e.key) {
         case 'Enter':
           e.preventDefault();
-          insertAfter(index, todo.indent_level);
+          // On a completed todo with no notes yet, Enter re-opens a note input
+          // (notes can otherwise become unreachable once all of them are deleted).
+          if (todo.completed && !memos.some((m) => m.todo_id === todo.id && !m.is_pre_edit)) {
+            addMemo(todo.id);
+          } else {
+            insertAfter(index, todo.indent_level);
+          }
           break;
         case 'Tab':
           e.preventDefault();
@@ -316,7 +340,7 @@ export default function TodoList({ date, label }: Props) {
         }
       }
     },
-    [insertAfter, handleIndent, deleteTodo, flatItems, focusItem],
+    [insertAfter, handleIndent, deleteTodo, flatItems, focusItem, addMemo, memos],
   );
 
   const createFirst = useCallback(async () => {
@@ -333,24 +357,6 @@ export default function TodoList({ date, label }: Props) {
   }, [date, userId]);
 
   // ── memo handlers ───────────────────────────────────────────────────────────
-
-  const addMemo = useCallback(async (todoId: string, afterMemoId?: string) => {
-    const { data, error } = await supabase
-      .from('todo_memos')
-      .insert({ todo_id: todoId, text: '', is_pre_edit: false })
-      .select()
-      .single();
-    if (error) { console.error('addMemo failed:', error.message); return; }
-    if (!data) return;
-
-    pendingMemoFocusId.current = data.id;
-    setMemos((prev) => {
-      if (!afterMemoId) return [...prev, data as Memo];
-      const idx = prev.findIndex((m) => m.id === afterMemoId);
-      if (idx === -1) return [...prev, data as Memo];
-      return [...prev.slice(0, idx + 1), data as Memo, ...prev.slice(idx + 1)];
-    });
-  }, []);
 
   const deleteMemo = useCallback(
     async (memo: Memo, todoId: string) => {
@@ -378,7 +384,20 @@ export default function TodoList({ date, label }: Props) {
       switch (e.key) {
         case 'Enter':
           e.preventDefault();
-          addMemo(todoId, memo.id);
+          if (memo.text === '') {
+            // Empty memo + Enter → start a new todo (not another memo).
+            // Drop the empty memo and insert a todo after the parent's block.
+            const parentIndex = todos.findIndex((t) => t.id === todoId);
+            const timer = memoPendingSaves.current.get(memo.id);
+            if (timer) { clearTimeout(timer); memoPendingSaves.current.delete(memo.id); }
+            setMemos((prev) => prev.filter((m) => m.id !== memo.id));
+            supabase.from('todo_memos').delete().eq('id', memo.id).then(({ error }) => {
+              if (error) console.error('memo delete failed:', error.message);
+            });
+            if (parentIndex !== -1) insertAfter(parentIndex, todos[parentIndex].indent_level);
+          } else {
+            addMemo(todoId, memo.id);
+          }
           break;
         case 'Backspace':
           if (memo.text === '') { e.preventDefault(); deleteMemo(memo, todoId); }
@@ -395,7 +414,7 @@ export default function TodoList({ date, label }: Props) {
         }
       }
     },
-    [addMemo, deleteMemo, flatItems, focusItem],
+    [addMemo, deleteMemo, flatItems, focusItem, insertAfter, todos],
   );
 
   // ── render ──────────────────────────────────────────────────────────────────
