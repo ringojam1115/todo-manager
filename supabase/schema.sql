@@ -46,8 +46,19 @@ create table suggestion_items (
   adopted         boolean not null default false,
   adopted_at      timestamptz,
   adopted_todo_id uuid references todos(id) on delete set null,
+  -- For "subtasks for an existing task" suggestions:
+  --   existing_todo_id: set on the read-only parent row mirroring an existing todo.
+  --   parent_existing_todo_id: set on a suggested subtask that should be inserted
+  --     under that existing todo when adopted.
+  existing_todo_id        uuid references todos(id) on delete cascade,
+  parent_existing_todo_id uuid references todos(id) on delete cascade,
   created_at      timestamptz not null default now()
 );
+
+-- Migration for existing databases (safe to re-run):
+-- alter table suggestion_items
+--   add column if not exists existing_todo_id uuid references todos(id) on delete cascade,
+--   add column if not exists parent_existing_todo_id uuid references todos(id) on delete cascade;
 
 -- Open RLS policy for development — restrict by auth.uid() in production
 alter table todos enable row level security;
